@@ -1,106 +1,98 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const path = require('path');
-const mysql = require('mysql2/promise');
+const mysql = require('mysql2');
+const jwt = require('jsonwebtoken');
+var bodyParser = require('body-parser')
+var cors = require('cors')
+
+
+
 const app = express();
-const PORT = 3000;
+const port = 65000;
 
-
-app.use(bodyParser.urlencoded({ extended: true }));
+// Middleware
+app.use(express.json());
 app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(cors())
 
-app.use(express.static('public'));
-
-const config = {
+// MySQL connection
+const db = mysql.createConnection({
+    host: 'localhost',
     user: 'root',
-    server: 'localhost',
-    database: 'Exercise',
     password: '12345',
+    database: 'Eventon',
     port: 8000
-};
+});
 
-let connection;
+db.connect((err) => {
+    if (err) {
+        console.error('Error connecting to the database:', err);
+    } else {
+        console.log('Connected to MySQL database');
+    }
+});
 
-mysql.createConnection(config)
-    .then(conn => {
-        connection = conn;
-        console.log('Connected to MySQL');
-    })
-    .catch(err => {
-        console.error('Database connection failed:', err);
+// Register route
+app.post('/register', (req, res) => {
+    const {
+        role,
+        supplierCategory,
+        firstName,
+        lastName,
+        phoneNumber,
+        email,
+        password,
+    } = req.body;
+
+    // Check if the email already exists
+    db.query('SELECT * FROM users WHERE email = ?', [email], (err, result) => {
+        if (result.length > 0) {
+            console.log("already exists");
+            return res.status(400).json({ message: 'Email already exists' });
+        }
+
+        // Insert the new user into the database
+        db.query(
+            'INSERT INTO users (first_name, last_name, phone_number, email, password, role, supplier_Category) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            [firstName, lastName, phoneNumber, email, password, role, supplierCategory],
+            (err, result) => {
+                if (err) {
+                    console.log("error user");
+                    return res.status(500).json({ message: 'Error registering user', error: err });
+                }
+                res.status(201).json({ message: 'User registered successfully' });
+                console.log("new user");
+            }
+        );
     });
+});
 
-app.post('/login', async (req, res) => {
+
+// Login route
+app.post('/login', (req, res) => {
     const { email, password } = req.body;
 
-    try {
-        const [rows] = await connection.execute('SELECT username FROM Users WHERE email = ? AND password = ?', [email, password]);
-
-        if (rows.length > 0) {
-            res.status(201).send('User Log In successfully');
-        } else {
-            res.status(401).send('Invalid email or password');
-        }
-    } catch (err) {
-        console.error('SQL error', err);
-        res.status(500).send('Internal server error');
-    }
-});
-
-app.post('/register', async (req, res) => {
-    const { email, password, username } = req.body;
-
-    if (!email || !password || !username) {
-        return res.status(400).send('Missing required fields');
-    }
-
-    try {
-        const [rows] = await connection.execute('SELECT 1 FROM Users WHERE email = ?', [email]);
-
-        if (rows.length > 0) {
-            return res.status(400).send('User already exists');
+    // Find the user by username
+    db.query('SELECT * FROM users WHERE email = ?', [email], (err, result) => {
+        if (err || result.length === 0) {
+            return res.status(400).json({ message: 'Invalid credentials' });
         }
 
-        await connection.execute('INSERT INTO Users (email, password, username) VALUES (?, ?, ?)', [email, password, username]);
+        const user = result[0];
 
-        res.status(201).send('User registered successfully');
-    } catch (err) {
-        console.error('SQL error', err);
-        res.status(500).send('Internal server error');
-    }
-});
+        // Check the plain text password
+        if (password !== user.password) {
+            return res.status(400).json({ message: 'Invalid credentials' });
+        }
 
-app.get('/user', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'user.html'));
-});
+        // Generate a token
+        const token = jwt.sign({ userId: user.id }, 'your_jwt_secret', { expiresIn: '1h' });
 
-app.get('/', (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
-
-app.get('/api/users', async (req, res) => {
-    try {
-        const [rows] = await connection.execute('SELECT email, username FROM Users');
-        res.json(rows);
-    } catch (err) {
-        console.error('SQL error', err);
-        res.status(500).send('Internal server error');
-    }
-});
-
-app.get('/api/user', async (req, res) => {
-    const {email} = req.query;
-    try {
-        const [rows] = await connection.execute('SELECT username FROM Users WHERE email = ?', 
-            [email]);
-        res.json(rows);
-    } catch (err) {
-        console.error('SQL error', err);
-        res.status(500).send('Internal server error');
-    }
+        res.json({ token, userId: user.id });
+    });
 });
 
 // Start the server
-app.listen(PORT, () => {
-    console.log(`Server is running on http://localhost:${PORT}`);
+app.listen(port, () => {
+    console.log(`Server running on http://localhost:${port}`);
 });
