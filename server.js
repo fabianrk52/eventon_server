@@ -113,6 +113,121 @@ app.get('/suppliers', (req, res) => {
     });
 });
 
+
+app.post('/add_event', (req, res) => {
+    const { title, date, location, description, budget, status, numGuests, teammate, userId } = req.body;
+
+    db.query(
+        'INSERT INTO events (title, date, location, description, budget, status, num_guests, teammate, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        [title, date, location, description, budget, status, numGuests, teammate, userId],
+        (err, result) => {
+            if (err) {
+                return res.status(500).json({ message: 'Error creating event', error: err });
+            }
+            res.status(201).json({ message: 'Event created successfully', eventId: result.insertId });
+        }
+    )
+});
+
+
+app.get('/events-with-details', (req, res) => {
+    const token = req.headers.authorization.split(' ')[1];
+    const decodedToken = jwt.verify(token, 'your_jwt_secret');
+    const userId = decodedToken.userId;
+
+    // Query to fetch all events for the logged-in user
+    const query = `
+      SELECT 
+        e.id AS event_id, 
+        e.title, 
+        e.date, 
+        e.location, 
+        e.description, 
+        e.budget, 
+        e.status, 
+        e.num_guests, 
+        e.teammate,
+        g.id AS guest_id, 
+        g.name AS guest_name, 
+        g.surname AS guest_surname, 
+        g.phone AS guest_phone, 
+        g.confirmation AS guest_confirmation, 
+        g.table_number AS guest_table,
+        t.id AS task_id, 
+        t.title AS task_title, 
+        t.description AS task_description, 
+        t.deadline AS task_deadline, 
+        t.priority AS task_priority, 
+        t.teammate AS task_teammate, 
+        t.status AS task_status
+      FROM events e
+      LEFT JOIN guests g ON e.id = g.event_id
+      LEFT JOIN tasks t ON e.id = t.event_id
+      WHERE e.user_id = ?;
+    `;
+
+    db.query(query, [userId], (err, results) => {
+        if (err) {
+            return res.status(500).json({ message: 'Error fetching events', error: err });
+        }
+
+        // Process the results to group guests and tasks by event
+        const eventsMap = {};
+
+        results.forEach(row => {
+            const eventId = row.event_id;
+
+            // If the event is not yet added to the map, add it
+            if (!eventsMap[eventId]) {
+                eventsMap[eventId] = {
+                    id: eventId,
+                    title: row.title,
+                    date: row.date,
+                    location: row.location,
+                    description: row.description,
+                    budget: row.budget,
+                    status: row.status,
+                    num_guests: row.num_guests,
+                    teammate: row.teammate,
+                    guests: [],
+                    tasks: []
+                };
+            }
+
+            // Add guest to the event
+            if (row.guest_id) {
+                eventsMap[eventId].guests.push({
+                    id: row.guest_id,
+                    name: row.guest_name,
+                    surname: row.guest_surname,
+                    phone: row.guest_phone,
+                    confirmation: row.guest_confirmation,
+                    table: row.guest_table
+                });
+            }
+
+            // Add task to the event
+            if (row.task_id) {
+                eventsMap[eventId].tasks.push({
+                    id: row.task_id,
+                    title: row.task_title,
+                    description: row.task_description,
+                    deadline: row.task_deadline,
+                    priority: row.task_priority,
+                    teammate: row.task_teammate,
+                    status: row.task_status
+                });
+            }
+        });
+
+        // Convert the events map to an array
+        const events = Object.values(eventsMap);
+
+        res.json(events);
+    });
+});
+
+
 // Start the server
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
