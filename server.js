@@ -48,19 +48,19 @@ app.post('/register', (req, res) => {
     db.query('SELECT * FROM users WHERE email = ?', [email], (err, result) => {
         if (result.length > 0) {
             console.log("already exists");
-            return res.status(400).json({ message: 'Email already exists' });
+            return res.status(201).json({ message: 'Email already exists' });
         }
 
         // Insert the new user into the database
         db.query(
-            'INSERT INTO users (first_name, last_name, phone_number, email, password, role, supplier_Category) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            'INSERT INTO users (first_name, last_name, phone_number, email, password, role, supplier_category) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [firstName, lastName, phoneNumber, email, password, role, supplierCategory],
             (err, result) => {
                 if (err) {
                     console.log("error user");
                     return res.status(500).json({ message: 'Error registering user', error: err });
                 }
-                res.status(201).json({ message: 'User registered successfully' });
+                res.status(200).json({ message: 'User registered successfully' });
                 console.log("new user");
             }
         );
@@ -89,6 +89,7 @@ app.post('/login', (req, res) => {
         const token = jwt.sign({ userId: user.id }, 'your_jwt_secret', { expiresIn: '1h' });
 
         res.json({ token, userId: user.id });
+        console.log("login success");
     });
 });
 
