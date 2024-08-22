@@ -86,9 +86,9 @@ app.post('/login', (req, res) => {
         }
 
         // Generate a token
-        const token = jwt.sign({ userId: user.id }, 'your_jwt_secret', { expiresIn: '1h' });
+        const token = jwt.sign({ userId: user.id, name: user.first_name + " " + user.last_name }, 'your_jwt_secret', { expiresIn: '1h' });
 
-        res.json({ token, userId: user.id });
+        res.json({ token, userId: user.id, name: user.first_name + " " + user.last_name });
         console.log("login success");
     });
 });
