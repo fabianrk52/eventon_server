@@ -1,11 +1,9 @@
 const express = require('express');
 const mysql = require('mysql2');
 const jwt = require('jsonwebtoken');
-var bodyParser = require('body-parser')
-var cors = require('cors')
+const bodyParser = require('body-parser');
+const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
-
-
 
 const app = express();
 const port = 65000;
@@ -14,7 +12,7 @@ const port = 65000;
 app.use(express.json());
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: false }));
-app.use(cors())
+app.use(cors());
 
 // MySQL connection
 const db = mysql.createConnection({
@@ -33,120 +31,101 @@ db.connect((err) => {
     }
 });
 
+// JWT Token verification middleware
+const verifyToken = (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ message: 'Authorization header missing' });
+
+    const token = authHeader.split(' ')[1];
+    jwt.verify(token, 'your_jwt_secret', (err, decoded) => {
+        if (err) return res.status(403).json({ message: 'Invalid token' });
+        req.user = decoded;  // Add decoded token to request
+        next();
+    });
+};
+
+// Reusable function for queries
+const executeQuery = (query, params, res, successMessage) => {
+    db.query(query, params, (err, result) => {
+        if (err) {
+            console.error('Database query error:', err);
+            return res.status(500).json({ message: 'Database error', error: err });
+        }
+        res.status(200).json(successMessage || result);
+    });
+};
+
 // Register route
 app.post('/register', (req, res) => {
-    const {
-        role,
-        supplierCategory,
-        firstName,
-        lastName,
-        phoneNumber,
-        email,
-        password,
-    } = req.body;
+    const { role, supplierCategory, firstName, lastName, phoneNumber, email, password } = req.body;
+    const userId = uuidv4();
 
-    const user_id = uuidv4();  // Generate a UUID
-
-    // Check if the email already exists
     db.query('SELECT * FROM users WHERE email = ?', [email], (err, result) => {
-        if (result.length > 0) {
-            console.log("already exists");
-            return res.status(201).json({ message: 'Email already exists' });
-        }
+        if (err) return res.status(500).json({ message: 'Database error', error: err });
+        if (result.length > 0) return res.status(409).json({ message: 'Email already exists' });
 
-        // Insert the new user into the database
-        db.query(
-            'INSERT INTO users (id, first_name, last_name, phone_number, email, password, role, supplier_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            [user_id, firstName, lastName, phoneNumber, email, password, role, supplierCategory || "None"],
-            (err, result) => {
-                if (err) {
-                    console.log("error user");
-                    return res.status(500).json({ message: 'Error registering user', error: err });
-                }
-                res.status(200).json({ message: 'User registered successfully' });
-                console.log("new user");
-            }
-        );
+        const query = 'INSERT INTO users (id, first_name, last_name, phone_number, email, password, role, supplier_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+        const params = [userId, firstName, lastName, phoneNumber, email, password, role, supplierCategory || "None"];
+        executeQuery(query, params, res, { message: 'User registered successfully' });
     });
 });
-
 
 // Login route
 app.post('/login', (req, res) => {
     const { email, password } = req.body;
 
-    // Find the user by username
     db.query('SELECT * FROM users WHERE email = ?', [email], (err, result) => {
-        if (err || result.length === 0) {
-            return res.status(400).json({ message: 'Invalid credentials' });
-        }
+        if (err || result.length === 0) return res.status(400).json({ message: 'Invalid credentials' });
 
         const user = result[0];
+        if (password !== user.password) return res.status(400).json({ message: 'Invalid credentials' });
 
-        // Check the plain text password
-        if (password !== user.password) {
-            return res.status(400).json({ message: 'Invalid credentials' });
-        }
-
-        // Generate a token
-        const token = jwt.sign({ userId: user.id, name: user.first_name + " " + user.last_name }, 'your_jwt_secret', { expiresIn: '1h' });
-
-        res.json({ token, userId: user.id, name: user.first_name + " " + user.last_name });
-        console.log("login success");
+        const token = jwt.sign({ userId: user.id, name: `${user.first_name} ${user.last_name}` }, 'your_jwt_secret', { expiresIn: '1h' });
+        res.json({ token, userId: user.id, name: `${user.first_name} ${user.last_name}` });
     });
 });
 
-app.get('/user-profile/:id', (req, res) => {
+// Get user profile route
+app.get('/user-profile/:id', verifyToken, (req, res) => {
     const userId = req.params.id;
-
-    db.query('SELECT * FROM users WHERE id = ?', [userId], (err, result) => {
-        if (err || result.length === 0) {
-            return res.status(404).json({ message: 'User not found' });
-        }
-        res.json(result[0]);
-    });
+    executeQuery('SELECT * FROM users WHERE id = ?', [userId], res);
 });
 
-app.get('/suppliers', (req, res) => {
-    db.query('SELECT * FROM users WHERE role = "Supplier"', (err, results) => {
+// Update user profile route
+app.put('/user-profile/:id', verifyToken, (req, res) => {
+    const userId = req.params.id;
+    const { first_name, last_name, email, phone_number, bio, supplier_category, profilePhoto, coverPhoto } = req.body;
+
+    const query = `
+        UPDATE users 
+        SET first_name = ?, last_name = ?, email = ?, phone_number = ?, bio = ?, supplier_category = ?, profile_photo = ?, cover_photo = ?
+        WHERE id = ?`;
+    const params = [first_name, last_name, email, phone_number, bio, supplier_category, profilePhoto, coverPhoto, userId];
+
+    db.query(query, params, (err, result) => {
         if (err) {
-            return res.status(500).json({ message: 'Error fetching suppliers', error: err });
+            console.error('Error updating profile:', err);
+            return res.status(500).json({ message: 'Error updating profile', error: err });
         }
-        res.json(results);
+        res.status(200).json({ message: 'Profile updated successfully' });
     });
 });
 
 
-app.get('/events-with-details', (req, res) => {
-    const token = req.headers.authorization.split(' ')[1];
-    const decodedToken = jwt.verify(token, 'your_jwt_secret');
-    const userId = decodedToken.userId;
+// Get suppliers route
+app.get('/suppliers', verifyToken, (req, res) => {
+    executeQuery('SELECT * FROM users WHERE role = "Supplier"', [], res);
+});
 
-    // Query to fetch all events for the logged-in user
+// Get events with details route
+app.get('/events-with-details', verifyToken, (req, res) => {
+    const userId = req.user.userId;
+
     const query = `
       SELECT 
-        e.id AS event_id, 
-        e.title, 
-        e.date, 
-        e.location, 
-        e.description, 
-        e.budget, 
-        e.status, 
-        e.num_guests, 
-        e.teammate,
-        g.id AS guest_id, 
-        g.name AS guest_name, 
-        g.surname AS guest_surname, 
-        g.phone AS guest_phone, 
-        g.confirmation AS guest_confirmation, 
-        g.table_number AS guest_table,
-        t.id AS task_id, 
-        t.title AS task_title, 
-        t.description AS task_description, 
-        t.deadline AS task_deadline, 
-        t.priority AS task_priority, 
-        t.teammate AS task_teammate, 
-        t.status AS task_status
+        e.id AS event_id, e.title, e.date, e.location, e.description, e.budget, e.status, e.num_guests, e.teammate,
+        g.id AS guest_id, g.name AS guest_name, g.surname AS guest_surname, g.phone AS guest_phone, g.confirmation AS guest_confirmation, g.table_number AS guest_table,
+        t.id AS task_id, t.title AS task_title, t.description AS task_description, t.deadline AS task_deadline, t.priority AS task_priority, t.teammate AS task_teammate, t.status AS task_status
       FROM events e
       LEFT JOIN guests g ON e.id = g.event_id
       LEFT JOIN tasks t ON e.id = t.event_id
@@ -154,36 +133,62 @@ app.get('/events-with-details', (req, res) => {
     `;
 
     db.query(query, [userId], (err, results) => {
-        if (err) {
-            return res.status(500).json({ message: 'Error fetching events', error: err });
-        }
+        if (err) return res.status(500).json({ message: 'Error fetching events', error: err });
 
-        // Process the results to group guests and tasks by event
         const eventsMap = {};
-
         results.forEach(row => {
             const eventId = row.event_id;
-
-            // If the event is not yet added to the map, add it
             if (!eventsMap[eventId]) {
                 eventsMap[eventId] = {
-                    id: eventId,
-                    title: row.title,
-                    date: row.date,
-                    location: row.location,
-                    description: row.description,
-                    budget: row.budget,
-                    status: row.status,
-                    num_guests: row.num_guests,
-                    teammate: row.teammate,
-                    guests: [],
-                    tasks: []
+                    id: eventId, title: row.title, date: row.date, location: row.location,
+                    description: row.description, budget: row.budget, status: row.status,
+                    num_guests: row.num_guests, teammate: row.teammate, guests: [], tasks: []
                 };
             }
+            if (row.guest_id) eventsMap[eventId].guests.push({ id: row.guest_id, name: row.guest_name, surname: row.guest_surname, phone: row.guest_phone, confirmation: row.guest_confirmation, table: row.guest_table });
+            if (row.task_id) eventsMap[eventId].tasks.push({ id: row.task_id, title: row.task_title, description: row.task_description, deadline: row.task_deadline, priority: row.task_priority, teammate: row.task_teammate, status: row.task_status });
+        });
 
-            // Add guest to the event
+        const events = Object.values(eventsMap);
+        res.json(events);
+    });
+});
+
+app.get('/events-with-details/:eventId', verifyToken, (req, res) => {
+    const { eventId } = req.params;
+
+    const query = `
+        SELECT 
+            e.id AS event_id, e.title, e.date, e.location, e.description, e.budget, e.status, e.num_guests, e.teammate,
+            g.id AS guest_id, g.name AS guest_name, g.surname AS guest_surname, g.phone AS guest_phone, g.confirmation AS guest_confirmation, g.table_number AS guest_table,
+            t.id AS task_id, t.title AS task_title, t.description AS task_description, t.deadline AS task_deadline, t.priority AS task_priority, t.teammate AS task_teammate, t.status AS task_status
+        FROM events e
+        LEFT JOIN guests g ON e.id = g.event_id
+        LEFT JOIN tasks t ON e.id = t.event_id
+        WHERE e.id = ?;
+    `;
+
+    db.query(query, [eventId], (err, results) => {
+        if (err) return res.status(500).json({ message: 'Error fetching event details', error: err });
+
+        // Transform results into a single event object with guests and tasks arrays
+        const event = {
+            id: results[0]?.event_id || null,
+            title: results[0]?.title || '',
+            date: results[0]?.date || '',
+            location: results[0]?.location || '',
+            description: results[0]?.description || '',
+            budget: results[0]?.budget || '',
+            status: results[0]?.status || '',
+            num_guests: results[0]?.num_guests || 0,
+            teammate: results[0]?.teammate || '',
+            guests: [],
+            tasks: []
+        };
+
+        results.forEach(row => {
             if (row.guest_id) {
-                eventsMap[eventId].guests.push({
+                event.guests.push({
                     id: row.guest_id,
                     name: row.guest_name,
                     surname: row.guest_surname,
@@ -192,10 +197,8 @@ app.get('/events-with-details', (req, res) => {
                     table: row.guest_table
                 });
             }
-
-            // Add task to the event
             if (row.task_id) {
-                eventsMap[eventId].tasks.push({
+                event.tasks.push({
                     id: row.task_id,
                     title: row.task_title,
                     description: row.task_description,
@@ -207,36 +210,104 @@ app.get('/events-with-details', (req, res) => {
             }
         });
 
-        // Convert the events map to an array
-        const events = Object.values(eventsMap);
-
-        res.json(events);
+        res.status(200).json(event);
     });
 });
 
-app.post('/add_event', (req, res) => {
-    const token = req.headers.authorization.split(' ')[1];
-    const decodedToken = jwt.verify(token, 'your_jwt_secret');
-    const userId = decodedToken.userId;
-  
-    const { title, date, location, description, budget, status, numGuests, teammate } = req.body;
-  
-    const eventId = uuidv4();  // Generate a unique ID for the event
-  
-    db.query(
-      'INSERT INTO events (id, title, date, location, description, budget, status, num_guests, teammate, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [eventId, title, date, location, description, budget, status, numGuests, teammate, userId],
-      (err, result) => {
-        if (err) {
-          return res.status(500).json({ message: 'Error creating event', error: err });
-        }
-        res.status(201).json({ message: 'Event created successfully', eventId });
-        console.log("new event");
-      }
-    );
-  });
-  
 
+// Add event route
+app.post('/add_event', verifyToken, (req, res) => {
+    const userId = req.user.userId;
+    const { title, date, location, description, budget, status, numGuests, teammate } = req.body;
+    const eventId = uuidv4();
+
+    const query = 'INSERT INTO events (id, title, date, location, description, budget, status, num_guests, teammate, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+    const params = [eventId, title, date, location, description, budget, status, numGuests, teammate, userId];
+    executeQuery(query, params, res, { message: 'Event created successfully', eventId });
+});
+
+// Add guest to event route
+app.post('/events/:eventId/guests', verifyToken, (req, res) => {
+    const { eventId } = req.params;
+    const { name, surname, phone, confirmation, table } = req.body;
+    const guestId = uuidv4();
+
+    const query = 'INSERT INTO guests (id, name, surname, phone, confirmation, table_number, event_id) VALUES (?, ?, ?, ?, ?, ?, ?)';
+    const params = [guestId, name, surname, phone, confirmation || "None", table, eventId];
+    executeQuery(query, params, res, { message: 'Guest added successfully', guestId });
+});
+
+// Add task to event route
+app.post('/events/:eventId/tasks', verifyToken, (req, res) => {
+    const { eventId } = req.params;
+    const { title, description, deadline, priority, teammate, status } = req.body;
+    const taskId = uuidv4();
+
+    const query = 'INSERT INTO tasks (id, title, description, deadline, priority, teammate, status, event_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)';
+    const params = [taskId, title, description, deadline, priority, teammate, status, eventId];
+    executeQuery(query, params, res, { message: 'Task added successfully', taskId });
+});
+
+// Update event route
+app.put('/events/:eventId', verifyToken, (req, res) => {
+    const { eventId } = req.params;
+    const { title, date, location, description, budget, status, num_guests, teammate } = req.body;
+
+    const query = 'UPDATE events SET title = ?, date = ?, location = ?, description = ?, budget = ?, status = ?, num_guests = ?, teammate = ? WHERE id = ?';
+    const params = [title, date, location, description, budget, status, num_guests, teammate, eventId];
+    executeQuery(query, params, res, { message: 'Event updated successfully' });
+});
+
+// Update guest route
+app.put('/events/:eventId/guests/:guestId', verifyToken, (req, res) => {
+    const { guestId } = req.params;
+    const { name, surname, phone, confirmation, table } = req.body;
+
+    const query = 'UPDATE guests SET name = ?, surname = ?, phone = ?, confirmation = ?, table_number = ? WHERE id = ?';
+    const params = [name, surname, phone, confirmation, table, guestId];
+    executeQuery(query, params, res, { message: 'Guest updated successfully' });
+});
+
+// Update task route
+app.put('/events/:eventId/tasks/:taskId', verifyToken, (req, res) => {
+    const { taskId } = req.params;
+    const { title, description, deadline, priority, teammate, status } = req.body;
+
+    const query = 'UPDATE tasks SET title = ?, description = ?, deadline = ?, priority = ?, teammate = ?, status = ? WHERE id = ?';
+    const params = [title, description, deadline, priority, teammate, status, taskId];
+    executeQuery(query, params, res, { message: 'Task updated successfully' });
+});
+
+// Delete guest route
+app.delete('/events/:eventId/guests/:guestId', verifyToken, (req, res) => {
+    const { guestId } = req.params;
+    executeQuery('DELETE FROM guests WHERE id = ?', [guestId], res, { message: 'Guest deleted successfully' });
+});
+
+// Delete task route
+app.delete('/events/:eventId/tasks/:taskId', verifyToken, (req, res) => {
+    const { taskId } = req.params;
+    executeQuery('DELETE FROM tasks WHERE id = ?', [taskId], res, { message: 'Task deleted successfully' });
+});
+
+// Delete event route
+app.delete('/events/:eventId', verifyToken, (req, res) => {
+    const { eventId } = req.params;
+
+    // Delete related guests and tasks first
+    db.query('DELETE FROM guests WHERE event_id = ?', [eventId], (err) => {
+        if (err) return res.status(500).json({ message: 'Error deleting related guests', error: err });
+
+        db.query('DELETE FROM tasks WHERE event_id = ?', [eventId], (err) => {
+            if (err) return res.status(500).json({ message: 'Error deleting related tasks', error: err });
+
+            db.query('DELETE FROM events WHERE id = ?', [eventId], (err) => {
+                if (err) return res.status(500).json({ message: 'Error deleting event', error: err });
+                res.status(200).json({ message: 'Event deleted successfully' });
+            });
+        });
+    });
+});
 
 // Start the server
 app.listen(port, () => {
