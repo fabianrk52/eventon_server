@@ -3,6 +3,7 @@ const mysql = require('mysql2');
 const jwt = require('jsonwebtoken');
 var bodyParser = require('body-parser')
 var cors = require('cors')
+const { v4: uuidv4 } = require('uuid');
 
 
 
@@ -44,6 +45,8 @@ app.post('/register', (req, res) => {
         password,
     } = req.body;
 
+    const user_id = uuidv4();  // Generate a UUID
+
     // Check if the email already exists
     db.query('SELECT * FROM users WHERE email = ?', [email], (err, result) => {
         if (result.length > 0) {
@@ -53,8 +56,8 @@ app.post('/register', (req, res) => {
 
         // Insert the new user into the database
         db.query(
-            'INSERT INTO users (first_name, last_name, phone_number, email, password, role, supplier_category) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [firstName, lastName, phoneNumber, email, password, role, supplierCategory],
+            'INSERT INTO users (id, first_name, last_name, phone_number, email, password, role, supplier_category) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [user_id, firstName, lastName, phoneNumber, email, password, role, supplierCategory || "None"],
             (err, result) => {
                 if (err) {
                     console.log("error user");
@@ -111,22 +114,6 @@ app.get('/suppliers', (req, res) => {
         }
         res.json(results);
     });
-});
-
-
-app.post('/add_event', (req, res) => {
-    const { title, date, location, description, budget, status, numGuests, teammate, userId } = req.body;
-
-    db.query(
-        'INSERT INTO events (title, date, location, description, budget, status, num_guests, teammate, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-        [title, date, location, description, budget, status, numGuests, teammate, userId],
-        (err, result) => {
-            if (err) {
-                return res.status(500).json({ message: 'Error creating event', error: err });
-            }
-            res.status(201).json({ message: 'Event created successfully', eventId: result.insertId });
-        }
-    )
 });
 
 
@@ -226,6 +213,29 @@ app.get('/events-with-details', (req, res) => {
         res.json(events);
     });
 });
+
+app.post('/add_event', (req, res) => {
+    const token = req.headers.authorization.split(' ')[1];
+    const decodedToken = jwt.verify(token, 'your_jwt_secret');
+    const userId = decodedToken.userId;
+  
+    const { title, date, location, description, budget, status, numGuests, teammate } = req.body;
+  
+    const eventId = uuidv4();  // Generate a unique ID for the event
+  
+    db.query(
+      'INSERT INTO events (id, title, date, location, description, budget, status, num_guests, teammate, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [eventId, title, date, location, description, budget, status, numGuests, teammate, userId],
+      (err, result) => {
+        if (err) {
+          return res.status(500).json({ message: 'Error creating event', error: err });
+        }
+        res.status(201).json({ message: 'Event created successfully', eventId });
+        console.log("new event");
+      }
+    );
+  });
+  
 
 
 // Start the server
