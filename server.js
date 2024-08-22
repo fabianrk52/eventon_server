@@ -93,6 +93,17 @@ app.post('/login', (req, res) => {
     });
 });
 
+app.get('/user-profile/:id', (req, res) => {
+    const userId = req.params.id;
+
+    db.query('SELECT * FROM users WHERE id = ?', [userId], (err, result) => {
+        if (err || result.length === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+        res.json(result[0]);
+    });
+});
+
 // Start the server
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
