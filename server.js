@@ -104,6 +104,15 @@ app.get('/user-profile/:id', (req, res) => {
     });
 });
 
+app.get('/suppliers', (req, res) => {
+    db.query('SELECT * FROM users WHERE role = "Supplier"', (err, results) => {
+        if (err) {
+            return res.status(500).json({ message: 'Error fetching suppliers', error: err });
+        }
+        res.json(results);
+    });
+});
+
 // Start the server
 app.listen(port, () => {
     console.log(`Server running on http://localhost:${port}`);
