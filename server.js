@@ -4,9 +4,13 @@ const jwt = require('jsonwebtoken');
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
+
 
 const app = express();
 const port = 65000;
+
+const upload = multer({ storage: multer.memoryStorage() });  // Store the image in memory temporarily
 
 // Middleware
 app.use(express.json());
@@ -80,16 +84,42 @@ app.post('/login', (req, res) => {
         const user = result[0];
         if (password !== user.password) return res.status(400).json({ message: 'Invalid credentials' });
 
-        const token = jwt.sign({ userId: user.id, name: `${user.first_name} ${user.last_name}`, role: user.role}, 'your_jwt_secret', { expiresIn: '1h' });
-        res.json({ token, userId: user.id, name: `${user.first_name} ${user.last_name}`, role:user.role });
+        const token = jwt.sign({ userId: user.id, name: `${user.first_name} ${user.last_name}`, role: user.role }, 'your_jwt_secret', { expiresIn: '1h' });
+        res.json({ token, userId: user.id, name: `${user.first_name} ${user.last_name}`, role: user.role });
     });
 });
 
-// Get user profile route
 app.get('/user-profile/:id', verifyToken, (req, res) => {
     const userId = req.params.id;
-    executeQuery('SELECT * FROM users WHERE id = ?', [userId], res);
-});
+  
+    const query = `
+      SELECT first_name, last_name, email, phone_number, bio, supplier_category, reviews, profile_image, cover_image
+      FROM users WHERE id = ?`;
+  
+    db.query(query, [userId], (err, result) => {
+      if (err) {
+        return res.status(500).json({ message: 'Error fetching user data', error: err });
+      }
+  
+      if (result.length > 0) {
+        const user = result[0];
+  
+        // Convert BLOB to base64 string for both images
+        if (user.profile_image) {
+          user.profile_image = Buffer.from(user.profile_image).toString('base64');
+        }
+        if (user.cover_image) {
+          user.cover_image = Buffer.from(user.cover_image).toString('base64');
+        }
+  
+        res.status(200).json([user]);
+      } else {
+        res.status(404).json({ message: 'User not found' });
+      }
+    });
+  });
+  
+
 
 // Update user profile route
 app.put('/user-profile/:id', verifyToken, (req, res) => {
@@ -313,48 +343,71 @@ app.post('/send-message/:supplierId', verifyToken, (req, res) => {
     const { supplierId } = req.params;
     const { first_name, last_name, email, phone_number, message } = req.body;
     const messageId = uuidv4();  // Generate a unique ID for the message
-  
+
     const query = `
       INSERT INTO messages (id, supplier_id, first_name, last_name, email, phone_number, message, date)
       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`;
     const params = [messageId, supplierId, first_name, last_name, email, phone_number, message];
-  
-    db.query(query, params, (err, result) => {
-      if (err) {
-        console.error('Error saving message:', err);
-        return res.status(500).json({ message: 'Error saving message', error: err });
-      }
-      res.status(201).json({ message: 'Message sent successfully' });
-    });
-  });
 
-  app.get('/supplier-messages', verifyToken, (req, res) => {
+    db.query(query, params, (err, result) => {
+        if (err) {
+            console.error('Error saving message:', err);
+            return res.status(500).json({ message: 'Error saving message', error: err });
+        }
+        res.status(201).json({ message: 'Message sent successfully' });
+    });
+});
+
+app.get('/supplier-messages', verifyToken, (req, res) => {
     const supplierId = req.user.userId;  // Assuming the supplier ID is the same as the logged-in user's ID
-  
+
     const query = `SELECT * FROM messages WHERE supplier_id = ? ORDER BY date DESC`;
     db.query(query, [supplierId], (err, results) => {
-      if (err) {
-        console.error('Error fetching messages:', err);
-        return res.status(500).json({ message: 'Error fetching messages', error: err });
-      }
-      res.status(200).json(results);
+        if (err) {
+            console.error('Error fetching messages:', err);
+            return res.status(500).json({ message: 'Error fetching messages', error: err });
+        }
+        res.status(200).json(results);
     });
-  });
+});
 
-  app.put('/supplier-messages/:id', verifyToken, (req, res) => {
+app.put('/supplier-messages/:id', verifyToken, (req, res) => {
     const { id } = req.params;
     const { status } = req.body;
-  
+
     const query = `UPDATE messages SET status = ? WHERE id = ?`;
     db.query(query, [status, id], (err, result) => {
-      if (err) {
-        console.error('Error updating message status:', err);
-        return res.status(500).json({ message: 'Error updating message status', error: err });
-      }
-      res.status(200).json({ message: 'Message status updated successfully' });
+        if (err) {
+            console.error('Error updating message status:', err);
+            return res.status(500).json({ message: 'Error updating message status', error: err });
+        }
+        res.status(200).json({ message: 'Message status updated successfully' });
     });
-  });
-  
+});
+
+// Upload profile or cover image
+app.post('/upload-image/:userId/:imageType', verifyToken, upload.single('image'), (req, res) => {
+    const { userId, imageType } = req.params;
+    const image = req.file.buffer;  // Access the image data from the buffer
+
+    let query;
+    if (imageType === 'profile') {
+        query = `UPDATE users SET profile_image = ? WHERE id = ?`;
+    } else if (imageType === 'cover') {
+        query = `UPDATE users SET cover_image = ? WHERE id = ?`;
+    } else {
+        return res.status(400).json({ message: 'Invalid image type' });
+    }
+
+    db.query(query, [image, userId], (err, result) => {
+        if (err) {
+            console.error('Error saving image:', err);
+            return res.status(500).json({ message: 'Error saving image', error: err });
+        }
+        res.status(200).json({ message: `${imageType} image uploaded successfully` });
+    });
+});
+
 
 // Start the server
 app.listen(port, () => {
