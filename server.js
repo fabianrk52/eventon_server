@@ -93,7 +93,7 @@ app.get('/user-profile/:id', verifyToken, (req, res) => {
     const userId = req.params.id;
 
     const query = `
-      SELECT first_name, last_name, email, phone_number, bio, supplier_category, reviews, profile_image, cover_image
+      SELECT first_name, last_name, email, phone_number, bio, supplier_category, reviews, profile_image, cover_image, location, rating
       FROM users WHERE id = ?`;
 
     db.query(query, [userId], (err, result) => {
@@ -128,9 +128,9 @@ app.put('/user-profile/:id', verifyToken, (req, res) => {
 
     const query = `
         UPDATE users 
-        SET first_name = ?, last_name = ?, email = ?, phone_number = ?, bio = ?, supplier_category = ?, profile_image = ?, cover_image = ?
+        SET first_name = ?, last_name = ?, email = ?, phone_number = ?, bio = ?, supplier_category = ?
         WHERE id = ?`;
-    const params = [first_name, last_name, email, phone_number, bio, supplier_category, profilePhoto, coverPhoto, userId];
+    const params = [first_name, last_name, email, phone_number, bio, supplier_category, userId];
 
     db.query(query, params, (err, result) => {
         if (err) {
