@@ -14,9 +14,9 @@ const upload = multer({ storage: multer.memoryStorage() });  // Store the image 
 
 // Middleware
 app.use(express.json());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: false }));
 app.use(cors());
+app.use(bodyParser.json({ limit: '50mb' }));
+app.use(bodyParser.urlencoded({ limit: '50mb', extended: true }));
 
 // MySQL connection
 const db = mysql.createConnection({
@@ -91,34 +91,34 @@ app.post('/login', (req, res) => {
 
 app.get('/user-profile/:id', verifyToken, (req, res) => {
     const userId = req.params.id;
-  
+
     const query = `
       SELECT first_name, last_name, email, phone_number, bio, supplier_category, reviews, profile_image, cover_image
       FROM users WHERE id = ?`;
-  
+
     db.query(query, [userId], (err, result) => {
-      if (err) {
-        return res.status(500).json({ message: 'Error fetching user data', error: err });
-      }
-  
-      if (result.length > 0) {
-        const user = result[0];
-  
-        // Convert BLOB to base64 string for both images
-        if (user.profile_image) {
-          user.profile_image = Buffer.from(user.profile_image).toString('base64');
+        if (err) {
+            return res.status(500).json({ message: 'Error fetching user data', error: err });
         }
-        if (user.cover_image) {
-          user.cover_image = Buffer.from(user.cover_image).toString('base64');
+
+        if (result.length > 0) {
+            const user = result[0];
+
+            // Convert BLOB to base64 string for both images
+            if (user.profile_image) {
+                user.profile_image = Buffer.from(user.profile_image).toString('base64');
+            }
+            if (user.cover_image) {
+                user.cover_image = Buffer.from(user.cover_image).toString('base64');
+            }
+
+            res.status(200).json([user]);
+        } else {
+            res.status(404).json({ message: 'User not found' });
         }
-  
-        res.status(200).json([user]);
-      } else {
-        res.status(404).json({ message: 'User not found' });
-      }
     });
-  });
-  
+});
+
 
 
 // Update user profile route
@@ -128,7 +128,7 @@ app.put('/user-profile/:id', verifyToken, (req, res) => {
 
     const query = `
         UPDATE users 
-        SET first_name = ?, last_name = ?, email = ?, phone_number = ?, bio = ?, supplier_category = ?, profile_photo = ?, cover_photo = ?
+        SET first_name = ?, last_name = ?, email = ?, phone_number = ?, bio = ?, supplier_category = ?, profile_image = ?, cover_image = ?
         WHERE id = ?`;
     const params = [first_name, last_name, email, phone_number, bio, supplier_category, profilePhoto, coverPhoto, userId];
 
@@ -385,10 +385,9 @@ app.put('/supplier-messages/:id', verifyToken, (req, res) => {
     });
 });
 
-// Upload profile or cover image
 app.post('/upload-image/:userId/:imageType', verifyToken, upload.single('image'), (req, res) => {
     const { userId, imageType } = req.params;
-    const image = req.file.buffer;  // Access the image data from the buffer
+    const image = req.file.buffer;
 
     let query;
     if (imageType === 'profile') {
@@ -404,9 +403,15 @@ app.post('/upload-image/:userId/:imageType', verifyToken, upload.single('image')
             console.error('Error saving image:', err);
             return res.status(500).json({ message: 'Error saving image', error: err });
         }
-        res.status(200).json({ message: `${imageType} image uploaded successfully` });
+
+        // Convert the image buffer to base64 and send it back to the frontend
+        const base64Image = image.toString('base64');
+        res.status(200).json({ message: `${imageType} image uploaded successfully`, base64Image });
     });
 });
+
+
+
 
 
 // Start the server
