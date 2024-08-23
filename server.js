@@ -119,12 +119,10 @@ app.get('/user-profile/:id', verifyToken, (req, res) => {
     });
 });
 
-
-
 // Update user profile route
 app.put('/user-profile/:id', verifyToken, (req, res) => {
     const userId = req.params.id;
-    const { first_name, last_name, email, phone_number, bio, supplier_category, profilePhoto, coverPhoto } = req.body;
+    const { first_name, last_name, email, phone_number, bio, supplier_category} = req.body;
 
     const query = `
         UPDATE users 
@@ -152,20 +150,23 @@ app.get('/events-with-details', verifyToken, (req, res) => {
     const userId = req.user.userId;
 
     const query = `
-      SELECT 
-        e.id AS event_id, e.title, e.date, e.location, e.description, e.budget, e.status, e.num_guests, e.teammate,
-        g.id AS guest_id, g.name AS guest_name, g.surname AS guest_surname, g.phone AS guest_phone, g.confirmation AS guest_confirmation, g.table_number AS guest_table,
-        t.id AS task_id, t.title AS task_title, t.description AS task_description, t.deadline AS task_deadline, t.priority AS task_priority, t.teammate AS task_teammate, t.status AS task_status
-      FROM events e
-      LEFT JOIN guests g ON e.id = g.event_id
-      LEFT JOIN tasks t ON e.id = t.event_id
-      WHERE e.user_id = ?;
+        SELECT 
+            e.id AS event_id, e.title, e.date, e.location, e.description, e.budget, e.status, e.num_guests, e.teammate,
+            g.id AS guest_id, g.name AS guest_name, g.surname AS guest_surname, g.phone AS guest_phone, g.confirmation AS guest_confirmation, g.table_number AS guest_table,
+            t.id AS task_id, t.title AS task_title, t.description AS task_description, t.deadline AS task_deadline, t.priority AS task_priority, t.teammate AS task_teammate, t.status AS task_status
+        FROM events e
+        LEFT JOIN guests g ON e.id = g.event_id
+        LEFT JOIN tasks t ON e.id = t.event_id
+        WHERE e.user_id = ?;
     `;
 
     db.query(query, [userId], (err, results) => {
         if (err) return res.status(500).json({ message: 'Error fetching events', error: err });
 
         const eventsMap = {};
+        const addedGuestIds = new Set();
+        const addedTaskIds = new Set();
+
         results.forEach(row => {
             const eventId = row.event_id;
             if (!eventsMap[eventId]) {
@@ -175,12 +176,65 @@ app.get('/events-with-details', verifyToken, (req, res) => {
                     num_guests: row.num_guests, teammate: row.teammate, guests: [], tasks: []
                 };
             }
-            if (row.guest_id) eventsMap[eventId].guests.push({ id: row.guest_id, name: row.guest_name, surname: row.guest_surname, phone: row.guest_phone, confirmation: row.guest_confirmation, table: row.guest_table });
-            if (row.task_id) eventsMap[eventId].tasks.push({ id: row.task_id, title: row.task_title, description: row.task_description, deadline: row.task_deadline, priority: row.task_priority, teammate: row.task_teammate, status: row.task_status });
+
+            // Add guests to the event only if they haven't been added before
+            if (row.guest_id && !addedGuestIds.has(row.guest_id)) {
+                eventsMap[eventId].guests.push({
+                    id: row.guest_id,
+                    name: row.guest_name,
+                    surname: row.guest_surname,
+                    phone: row.guest_phone,
+                    confirmation: row.guest_confirmation,
+                    table: row.guest_table
+                });
+                addedGuestIds.add(row.guest_id);
+            }
+
+            // Add tasks to the event only if they haven't been added before
+            if (row.task_id && !addedTaskIds.has(row.task_id)) {
+                eventsMap[eventId].tasks.push({
+                    id: row.task_id,
+                    title: row.task_title,
+                    description: row.task_description,
+                    deadline: row.task_deadline,
+                    priority: row.task_priority,
+                    teammate: row.task_teammate,
+                    status: row.task_status
+                });
+                addedTaskIds.add(row.task_id);
+            }
         });
 
         const events = Object.values(eventsMap);
         res.json(events);
+    });
+});
+
+//Get Guest by eventId
+app.get('/events/:eventId/guests/', verifyToken, (req, res) => {
+    const { eventId } = req.params;
+
+    const query = 'SELECT * FROM guests WHERE event_id = ?';
+    db.query(query, [eventId], (err, results) => {
+        if (err) {
+            console.error('Error fetching guests:', err);
+            return res.status(500).json({ message: 'Error fetching guests', error: err });
+        }
+        res.status(200).json(results);
+    });
+});
+
+//Get all task by eventID
+app.get('/events/:eventId/tasks', verifyToken, (req, res) => {
+    const { eventId } = req.params;
+
+    const query = 'SELECT * FROM tasks WHERE event_id = ?';
+    db.query(query, [eventId], (err, results) => {
+        if (err) {
+            console.error('Error fetching tasks:', err);
+            return res.status(500).json({ message: 'Error fetching tasks', error: err });
+        }
+        res.status(200).json(results);
     });
 });
 
@@ -201,7 +255,7 @@ app.get('/events-with-details/:eventId', verifyToken, (req, res) => {
     db.query(query, [eventId], (err, results) => {
         if (err) return res.status(500).json({ message: 'Error fetching event details', error: err });
 
-        // Transform results into a single event object with guests and tasks arrays
+        // Initialize a new event object with empty guests and tasks arrays
         const event = {
             id: results[0]?.event_id || null,
             title: results[0]?.title || '',
@@ -216,8 +270,13 @@ app.get('/events-with-details/:eventId', verifyToken, (req, res) => {
             tasks: []
         };
 
+        // Track already added guests and tasks
+        const addedGuestIds = new Set();
+        const addedTaskIds = new Set();
+
+        // Iterate through the results and add guests and tasks if not already added
         results.forEach(row => {
-            if (row.guest_id) {
+            if (row.guest_id && !addedGuestIds.has(row.guest_id)) {
                 event.guests.push({
                     id: row.guest_id,
                     name: row.guest_name,
@@ -226,8 +285,9 @@ app.get('/events-with-details/:eventId', verifyToken, (req, res) => {
                     confirmation: row.guest_confirmation,
                     table: row.guest_table
                 });
+                addedGuestIds.add(row.guest_id);
             }
-            if (row.task_id) {
+            if (row.task_id && !addedTaskIds.has(row.task_id)) {
                 event.tasks.push({
                     id: row.task_id,
                     title: row.task_title,
@@ -237,13 +297,13 @@ app.get('/events-with-details/:eventId', verifyToken, (req, res) => {
                     teammate: row.task_teammate,
                     status: row.task_status
                 });
+                addedTaskIds.add(row.task_id);
             }
         });
 
         res.status(200).json(event);
     });
 });
-
 
 // Add event route
 app.post('/add_event', verifyToken, (req, res) => {
