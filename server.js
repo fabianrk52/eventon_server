@@ -80,8 +80,8 @@ app.post('/login', (req, res) => {
         const user = result[0];
         if (password !== user.password) return res.status(400).json({ message: 'Invalid credentials' });
 
-        const token = jwt.sign({ userId: user.id, name: `${user.first_name} ${user.last_name}` }, 'your_jwt_secret', { expiresIn: '1h' });
-        res.json({ token, userId: user.id, name: `${user.first_name} ${user.last_name}` });
+        const token = jwt.sign({ userId: user.id, name: `${user.first_name} ${user.last_name}`, role: user.role}, 'your_jwt_secret', { expiresIn: '1h' });
+        res.json({ token, userId: user.id, name: `${user.first_name} ${user.last_name}`, role:user.role });
     });
 });
 
@@ -308,6 +308,53 @@ app.delete('/events/:eventId', verifyToken, (req, res) => {
         });
     });
 });
+
+app.post('/send-message/:supplierId', verifyToken, (req, res) => {
+    const { supplierId } = req.params;
+    const { first_name, last_name, email, phone_number, message } = req.body;
+    const messageId = uuidv4();  // Generate a unique ID for the message
+  
+    const query = `
+      INSERT INTO messages (id, supplier_id, first_name, last_name, email, phone_number, message, date)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())`;
+    const params = [messageId, supplierId, first_name, last_name, email, phone_number, message];
+  
+    db.query(query, params, (err, result) => {
+      if (err) {
+        console.error('Error saving message:', err);
+        return res.status(500).json({ message: 'Error saving message', error: err });
+      }
+      res.status(201).json({ message: 'Message sent successfully' });
+    });
+  });
+
+  app.get('/supplier-messages', verifyToken, (req, res) => {
+    const supplierId = req.user.userId;  // Assuming the supplier ID is the same as the logged-in user's ID
+  
+    const query = `SELECT * FROM messages WHERE supplier_id = ? ORDER BY date DESC`;
+    db.query(query, [supplierId], (err, results) => {
+      if (err) {
+        console.error('Error fetching messages:', err);
+        return res.status(500).json({ message: 'Error fetching messages', error: err });
+      }
+      res.status(200).json(results);
+    });
+  });
+
+  app.put('/supplier-messages/:id', verifyToken, (req, res) => {
+    const { id } = req.params;
+    const { status } = req.body;
+  
+    const query = `UPDATE messages SET status = ? WHERE id = ?`;
+    db.query(query, [status, id], (err, result) => {
+      if (err) {
+        console.error('Error updating message status:', err);
+        return res.status(500).json({ message: 'Error updating message status', error: err });
+      }
+      res.status(200).json({ message: 'Message status updated successfully' });
+    });
+  });
+  
 
 // Start the server
 app.listen(port, () => {
